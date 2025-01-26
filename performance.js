@@ -8,12 +8,12 @@ class PerformanceMonitor {
             updateCount: 0
         };
         this.thresholds = {
-            warning: 1500, // ms - increased threshold
-            critical: 3000 // ms - increased threshold
+            warning: 3000, // ms - more lenient threshold
+            critical: 5000 // ms - more lenient threshold
         };
         this.isRealTimeEnabled = false;
         this.debounceTimeout = null;
-        this.debounceDelay = 2000; // ms - increased delay
+        this.debounceDelay = 1000; // ms - reduced delay for better responsiveness
         
         // Smart debouncing
         this.lastUpdateTimestamp = 0;
@@ -330,5 +330,7 @@ class PerformanceMonitor {
     }
 }
 
-// Export singleton instance
-window.performanceMonitor = new PerformanceMonitor();
+// Create and export singleton instance
+const performanceMonitor = new PerformanceMonitor();
+export { performanceMonitor };
+window.performanceMonitor = performanceMonitor; // For backward compatibility

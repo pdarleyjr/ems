@@ -1,30 +1,51 @@
+import { templates, selectTemplate } from './narrative-templates.js';
+import { performanceMonitor } from './performance.js';
+
 // TensorFlow.js and USE initialization
 let model = null;
 let tfLoaded = false;
 let useLoaded = false;
+let modelLoadAttempts = 0;
+const MAX_LOAD_ATTEMPTS = 3;
 
-async function loadModel() {
+async function loadModel(attempt = 0) {
     try {
-        // Load Universal Sentence Encoder model
         model = await use.load();
         useLoaded = true;
         updateAIStatus();
         console.log('Universal Sentence Encoder loaded successfully');
     } catch (error) {
-        console.error('Error loading Universal Sentence Encoder:', error);
-        updateAIStatus();
+        console.error(`Error loading Universal Sentence Encoder (attempt ${attempt + 1}):`, error);
+        if (attempt < MAX_LOAD_ATTEMPTS) {
+            console.log(`Retrying model load... (${attempt + 1}/${MAX_LOAD_ATTEMPTS})`);
+            setTimeout(() => loadModel(attempt + 1), 1000 * (attempt + 1)); // Exponential backoff
+        } else {
+            console.error('Failed to load model after maximum attempts');
+            updateAIStatus();
+        }
     }
 }
 
-// Initialize when TensorFlow.js is ready
-tf.ready().then(() => {
-    tfLoaded = true;
-    updateAIStatus();
-    loadModel();
-}).catch(error => {
-    console.error('Error initializing TensorFlow.js:', error);
-    updateAIStatus();
-});
+// Initialize when TensorFlow.js is ready with retry logic
+function initializeTensorFlow(attempt = 0) {
+    tf.ready().then(() => {
+        tfLoaded = true;
+        updateAIStatus();
+        loadModel();
+    }).catch(error => {
+        console.error(`Error initializing TensorFlow.js (attempt ${attempt + 1}):`, error);
+        if (attempt < MAX_LOAD_ATTEMPTS) {
+            console.log(`Retrying TensorFlow initialization... (${attempt + 1}/${MAX_LOAD_ATTEMPTS})`);
+            setTimeout(() => initializeTensorFlow(attempt + 1), 1000 * (attempt + 1));
+        } else {
+            console.error('Failed to initialize TensorFlow after maximum attempts');
+            updateAIStatus();
+        }
+    });
+}
+
+// Start initialization
+initializeTensorFlow();
 
 // Text analysis using USE
 async function analyzeText(text) {
@@ -44,6 +65,33 @@ async function analyzeText(text) {
         console.error('Error analyzing text:', error);
         throw error;
     }
+}
+
+// Helper function to enhance dispatch text
+function enhanceDispatchText(text) {
+    if (!text) return '';
+    
+    // Common medical dispatch patterns
+    const dispatchPatterns = {
+        infection: "a possible infection",
+        pain: "complaints of pain",
+        injury: "a reported injury",
+        fall: "a fall incident",
+        breathing: "difficulty breathing",
+        chest: "chest discomfort",
+        sick: "illness",
+        medical: "a medical condition"
+    };
+
+    // Check for matches in dispatch patterns
+    for (const [key, value] of Object.entries(dispatchPatterns)) {
+        if (text.toLowerCase().includes(key)) {
+            return value;
+        }
+    }
+    
+    // Default enhancement
+    return `complaints of ${text.toLowerCase()}`;
 }
 
 // Enhanced text processing with USE
@@ -297,8 +345,13 @@ async function generateSmartNarrative(data, context) {
         if (data['transport-decision'] === 'transported') {
             const hospital = data['hospital'] || '';
             const room = data['room-number'] ? `room ${data['room-number']}` : '';
-            const staff = data['staff-name'] ? `RN ${data['staff-name']}` : '';
-            transportInfo = ensureProperPunctuation(`The patient was transported to ${hospital} ${room} and left in the care of ${staff}`);
+            const staff = data['receiving-staff'] ? `RN ${data['receiving-staff']}` : '';
+            
+            let transportText = `The patient was transported to ${hospital}`;
+            if (room) transportText += ` ${room}`;
+            if (staff) transportText += ` and left in the care of ${staff}`;
+            
+            transportInfo = ensureProperPunctuation(transportText);
         } else if (data['transport-decision'] === 'refused') {
             let refusalInfo = `Despite our recommendations for transport to further evaluate their condition, the patient refused transport. `;
             refusalInfo += `The patient was advised of the risks associated with refusing medical care and transport. `;
@@ -448,45 +501,101 @@ function initializeCallStatus() {
     const cancellationType = document.getElementById('cancellation-type');
     const pdBadgeGroup = document.getElementById('pd-badge-group');
     const otherCancellationGroup = document.getElementById('other-cancellation-group');
-    const formSections = document.querySelectorAll('.form-section:not(:first-child)');
+    const formSections = document.querySelectorAll('.form-section:not(.dispatch-info):not(#output-section .form-section)');
 
-    // Function to hide/show form sections based on cancellation type
+    // Function to handle module visibility based on cancellation type
     function updateFormSections(type) {
+        // Store output section's current visibility state
+        const outputSection = document.getElementById('output-section');
+        const wasOutputVisible = !outputSection.classList.contains('hidden');
+        
+        // First reset all required fields and hide all sections except dispatch info
         formSections.forEach(section => {
-            if (type === 'active') {
-                section.classList.remove('hidden');
-            } else if (type === 'dispatch' || type === 'pd') {
-                section.classList.add('hidden');
-            } else if (type === 'caller') {
-                if (section.classList.contains('patient-info')) {
-                    section.classList.remove('hidden');
-                } else {
-                    section.classList.add('hidden');
-                }
-            } else if (type === 'other') {
-                section.classList.remove('hidden');
-            }
+            section.classList.add('hidden');
+            section.querySelectorAll('[required]').forEach(field => {
+                field.required = false;
+            });
         });
+
+        // Restore output section visibility if it was visible
+        if (wasOutputVisible) {
+            outputSection.classList.remove('hidden');
+        }
+
+        // Then handle visibility based on type
+        switch(type) {
+            case 'active':
+                // Show all sections for active calls
+                formSections.forEach(section => {
+                    section.classList.remove('hidden');
+                    section.querySelectorAll('[data-required]').forEach(field => {
+                        field.required = true;
+                    });
+                });
+                break;
+
+            case 'caller':
+                // Show dispatch and patient info for caller cancellations
+                formSections.forEach(section => {
+                    if (section.classList.contains('patient-info')) {
+                        section.classList.remove('hidden');
+                        section.querySelectorAll('[data-required]').forEach(field => {
+                            field.required = true;
+                        });
+                    }
+                });
+                break;
+
+            case 'other':
+                // Show dispatch info and cancellation details for other cancellations
+                formSections.forEach(section => {
+                    if (section.classList.contains('cancellation-details')) {
+                        section.classList.remove('hidden');
+                        section.querySelectorAll('[data-required]').forEach(field => {
+                            field.required = true;
+                        });
+                    }
+                });
+                break;
+
+            // For 'dispatch' and 'pd', only dispatch info section remains visible (default state)
+        }
     }
 
     // Call Status change handler
     callStatusRadios.forEach(radio => {
         radio.addEventListener('change', (e) => {
             if (e.target.value === 'cancelled') {
+                // Show cancellation details
                 cancellationDetails.classList.remove('hidden');
-                // Reset cancellation type
+                cancellationType.required = true;
+
+                // Reset cancellation type to dispatch
                 cancellationType.value = 'dispatch';
+                
+                // Hide special fields
                 pdBadgeGroup.classList.add('hidden');
                 otherCancellationGroup.classList.add('hidden');
                 document.getElementById('pd-badge').required = false;
+                document.getElementById('pd-badge').value = '';
+                document.getElementById('other-reason').value = '';
+                
+                // Update form sections for dispatch cancellation
                 updateFormSections('dispatch');
             } else {
+                // Hide cancellation details
                 cancellationDetails.classList.add('hidden');
+                cancellationType.required = false;
+                
+                // Reset cancellation fields
                 pdBadgeGroup.classList.add('hidden');
                 otherCancellationGroup.classList.add('hidden');
                 cancellationType.value = 'dispatch';
                 document.getElementById('pd-badge').required = false;
                 document.getElementById('pd-badge').value = '';
+                document.getElementById('other-reason').value = '';
+                
+                // Show all sections for active call
                 updateFormSections('active');
             }
         });
@@ -494,7 +603,7 @@ function initializeCallStatus() {
 
     // Cancellation type change handler
     cancellationType.addEventListener('change', function() {
-        // Reset all special fields
+        // Reset special fields
         pdBadgeGroup.classList.add('hidden');
         otherCancellationGroup.classList.add('hidden');
         document.getElementById('pd-badge').required = false;
@@ -503,23 +612,228 @@ function initializeCallStatus() {
 
         // Handle specific cancellation types
         switch(this.value) {
-            case 'dispatch':
-                updateFormSections('dispatch');
-                break;
             case 'pd':
                 pdBadgeGroup.classList.remove('hidden');
                 document.getElementById('pd-badge').required = true;
                 updateFormSections('pd');
                 break;
+                
             case 'caller':
                 updateFormSections('caller');
                 break;
+                
             case 'other':
                 otherCancellationGroup.classList.remove('hidden');
+                document.getElementById('other-reason').required = true;
                 updateFormSections('other');
+                break;
+                
+            default: // dispatch
+                updateFormSections('dispatch');
                 break;
         }
     });
+
+    // Initial state
+    const activeCall = document.querySelector('input[name="call-status"][value="active"]');
+    if (activeCall && activeCall.checked) {
+        updateFormSections('active');
+    }
+}
+
+// Form submission and narrative generation
+function initializeForm() {
+    const form = document.getElementById('narrative-form');
+    const outputSection = document.getElementById('output-section');
+    const narrativeText = document.getElementById('narrative-text');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const copyBtn = document.getElementById('copy-btn');
+    const editBtn = document.getElementById('edit-btn');
+
+    // Add real-time update listeners to all form fields
+    const formFields = form.querySelectorAll('input, select, textarea');
+    formFields.forEach(field => {
+        ['input', 'change'].forEach(eventType => {
+            field.addEventListener(eventType, () => {
+                if (window.performanceMonitor.isRealTimeEnabled) {
+                    window.performanceMonitor.debounce(async () => {
+                        narrativeText.classList.add('updating');
+                        
+                        try {
+                            const formData = new FormData(form);
+                            const data = Object.fromEntries(formData.entries());
+                            
+                            // Generate appropriate narrative based on call status
+                            let narrative;
+                            if (data['call-status'] === 'cancelled') {
+                                narrative = await generateCancellationNarrative(data);
+                            } else {
+                                narrative = await generateNarrative(data);
+                            }
+                            
+                            // Always show the output section and update narrative text
+                            narrativeText.value = narrative;
+                            outputSection.classList.remove('hidden');
+                        } catch (error) {
+                            console.error('Error in real-time update:', error);
+                        } finally {
+                            setTimeout(() => {
+                                narrativeText.classList.remove('updating');
+                            }, 1000);
+                        }
+                    });
+                }
+            });
+        });
+    });
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        if (!tfLoaded || !useLoaded) {
+            alert('AI system is not fully initialized yet. Please wait a moment and try again.');
+            return;
+        }
+
+        // Get required fields based on call status
+        const callStatus = form.querySelector('input[name="call-status"]:checked').value;
+        const requiredFields = ['unit-number', 'dispatch-reason'];
+        
+        if (callStatus === 'cancelled') {
+            requiredFields.push('cancellation-type');
+            const cancellationType = form.querySelector('#cancellation-type').value;
+            if (cancellationType === 'pd') {
+                requiredFields.push('pd-badge');
+            } else if (cancellationType === 'other') {
+                requiredFields.push('other-reason');
+            }
+        }
+
+        // Check required fields
+        const missingFields = requiredFields.filter(field => {
+            const element = form.querySelector(`[name="${field}"]`);
+            return element && !element.value.trim();
+        });
+
+        if (missingFields.length > 0) {
+            alert('Please fill in all required fields before generating the narrative.');
+            return;
+        }
+
+        loadingIndicator.classList.remove('hidden');
+        outputSection.classList.add('hidden');
+
+        try {
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            // Generate appropriate narrative based on call status
+            let narrative;
+            if (data['call-status'] === 'cancelled') {
+                narrative = await generateCancellationNarrative(data);
+            } else {
+                narrative = await generateNarrative(data);
+            }
+            
+            // Always show the output section and update narrative text
+            narrativeText.value = narrative;
+            loadingIndicator.classList.add('hidden');
+            outputSection.classList.remove('hidden');
+        } catch (error) {
+            console.error('Error generating narrative:', error);
+            loadingIndicator.classList.add('hidden');
+            alert('An error occurred while generating the narrative. Please try again.');
+        }
+    });
+
+    copyBtn.addEventListener('click', function() {
+        narrativeText.select();
+        document.execCommand('copy');
+        showMessage('Copied to clipboard!');
+    });
+
+    editBtn.addEventListener('click', function() {
+        narrativeText.readOnly = !narrativeText.readOnly;
+        this.textContent = narrativeText.readOnly ? 'Enable Editing' : 'Disable Editing';
+    });
+}
+
+// Generate narrative for cancelled calls
+async function generateCancellationNarrative(data) {
+    const unit = data['unit-number'] === 'other' ? data['custom-unit'] : data['unit-number'];
+    const dispatchReason = enhanceDispatchText(data['dispatch-reason'] || '');
+    const responseDelays = Array.isArray(data['response-delays']) ? data['response-delays'] : 
+                          data['response-delays'] ? [data['response-delays']] : [];
+    const responseDelayText = processResponseDelays(responseDelays);
+    const context = `${unit} was dispatched to ${dispatchReason}${responseDelayText}`;
+    
+    let narrative = '';
+    
+    try {
+        switch(data['cancellation-type']) {
+            case 'dispatch':
+                narrative = `${context} While preparing to respond, dispatch advised that our services were no longer required. The call was cancelled prior to departure and ${unit} remained in service.`;
+                break;
+            case 'pd':
+                const badge = data['pd-badge'];
+                narrative = `${context} Upon arrival at the scene, law enforcement (Badge #${badge}) advised that EMS services were not needed. The scene was determined to be secure and medical assistance was not required. ${unit} cleared the scene and returned to service.`;
+                break;
+            case 'caller':
+                if (data['patient-age'] && data['patient-gender']) {
+                    const age = data['patient-age'];
+                    const gender = data['patient-gender'];
+                    narrative = `${context} Upon arrival, contact was made with a ${age} year old ${gender} patient who stated they no longer required emergency medical services. After confirming no medical emergency existed and the patient was not in distress, ${unit} cleared the scene and returned to service.`;
+                } else {
+                    narrative = `${context} Upon arrival, the caller advised that emergency medical services were no longer needed. After confirming no medical emergency existed, ${unit} cleared the scene and returned to service.`;
+                }
+                break;
+            case 'other':
+                const customReason = data['other-reason'];
+                if (customReason) {
+                    // Use TensorFlow.js to enhance the custom reason
+                    const embedding = await analyzeText(customReason);
+                    narrative = `${context} ${customReason} ${unit} cleared the scene and returned to service.`;
+                } else {
+                    narrative = `${context} The call was cancelled and ${unit} returned to service.`;
+                }
+                break;
+        }
+    } catch (error) {
+        console.error('Error generating cancellation narrative:', error);
+        narrative = `${context} The call was cancelled and ${unit} returned to service.`;
+    }
+    
+    // Use embeddings to enhance narrative flow
+    try {
+        const embedding = await analyzeText(narrative);
+        return ensureProperPunctuation(narrative);
+    } catch (error) {
+        console.error('Error enhancing cancellation narrative:', error);
+        return ensureProperPunctuation(narrative);
+    }
+}
+
+// Helper function to show temporary messages
+function showMessage(text) {
+    const message = document.createElement('div');
+    message.className = 'message';
+    message.textContent = text;
+    document.body.appendChild(message);
+    setTimeout(() => message.remove(), 3000);
+}
+
+// Update AI status indicator
+function updateAIStatus() {
+    const aiStatus = document.getElementById('ai-status');
+    if (aiStatus) {
+        if (tfLoaded && useLoaded) {
+            aiStatus.classList.remove('error');
+            aiStatus.setAttribute('title', 'AI active');
+        } else {
+            aiStatus.classList.add('error');
+            aiStatus.setAttribute('title', 'AI not fully initialized');
+        }
+    }
 }
 
 // Initialize everything when DOM is loaded
@@ -568,62 +882,6 @@ document.addEventListener('DOMContentLoaded', function() {
     updateAIStatus();
 });
 
-// Enhanced dispatch text processing
-function enhanceDispatchText(text) {
-    if (!text) return '';
-    
-    const text_lower = text.toLowerCase().trim();
-    
-    // Common medical patterns
-    const patterns = {
-        // Conditions needing "a/an"
-        infection: (t) => `a possible ${t}`,
-        injury: (t) => `an ${t}`,
-        incident: (t) => `an ${t}`,
-        emergency: (t) => `a medical ${t}`,
-        illness: (t) => `an ${t}`,
-        allergy: (t) => `an allergic reaction`,
-        
-        // Pain-related terms
-        pain: (t) => `complaints of ${t}`,
-        ache: (t) => `complaints of ${t}`,
-        discomfort: (t) => `complaints of ${t}`,
-        
-        // Specific conditions
-        breathing: (t) => `difficulty breathing`,
-        respiratory: (t) => `respiratory distress`,
-        chest: (t) => `chest discomfort`,
-        fall: (t) => `a fall incident`,
-        trauma: (t) => `a trauma incident`,
-        bleeding: (t) => `active bleeding`,
-        dizzy: (t) => `dizziness`,
-        sick: (t) => `illness`,
-        weak: (t) => `weakness`,
-        unconscious: (t) => `an unconscious person`,
-        unresponsive: (t) => `an unresponsive person`,
-        seizure: (t) => `a possible seizure`,
-        stroke: (t) => `a possible stroke`,
-        diabetic: (t) => `a diabetic emergency`,
-        cardiac: (t) => `a cardiac event`,
-        overdose: (t) => `a possible overdose`,
-        psychiatric: (t) => `a psychiatric emergency`
-    };
-    
-    // Check for matching patterns
-    for (const [key, formatter] of Object.entries(patterns)) {
-        if (text_lower.includes(key)) {
-            return formatter(text_lower);
-        }
-    }
-    
-    // Default formatting for unmatched terms
-    if (!text_lower.startsWith('a ') && !text_lower.startsWith('an ')) {
-        return `a patient with ${text_lower}`;
-    }
-    
-    return text_lower;
-}
-
 // Regular narrative generation
 window.generateNarrative = async function(data) {
     try {
@@ -658,7 +916,7 @@ window.generateNarrative = async function(data) {
             'transport-decision': data['transport-decision'],
             'hospital': data['hospital'],
             'room-number': data['room-number'],
-            'staff-name': data['staff-name'],
+            'receiving-staff': data['receiving-staff'],
             'refusal-witness': data['refusal-witness'],
             'refusal-capacity': data['refusal-capacity'],
             'opqrst-toggle': data['opqrst-toggle'],
@@ -682,162 +940,3 @@ window.generateNarrative = async function(data) {
         return `${unit || 'Unit'} was dispatched to ${data['dispatch-reason'] || 'location'}. Due to technical difficulties, a detailed narrative could not be generated.`;
     }
 };
-
-// Generate narrative for cancelled calls
-async function generateCancellationNarrative(data) {
-    const unit = data['unit-number'] === 'other' ? data['custom-unit'] : data['unit-number'];
-    const dispatchReason = enhanceDispatchText(data['dispatch-reason'] || '');
-    const responseDelays = Array.isArray(data['response-delays']) ? data['response-delays'] : 
-                          data['response-delays'] ? [data['response-delays']] : [];
-    const responseDelayText = processResponseDelays(responseDelays);
-    const context = `${unit} was dispatched to ${dispatchReason}.${responseDelayText}`;
-    
-    let narrative = '';
-    
-    switch(data['cancellation-type']) {
-        case 'dispatch':
-            narrative = `${context} Before departing the station, dispatch advised that our services were no longer required and that we could cancel the response. ${unit} returned to service.`;
-            break;
-        case 'pd':
-            narrative = `${context} Upon arrival, we were immediately canceled by the police department (Badge #${data['pd-badge']}) who determined no EMS services were needed. We returned to service without further action.`;
-            break;
-        case 'caller':
-            const age = data['patient-age'];
-            const gender = data['patient-gender'];
-            narrative = `${context} Upon arrival, we found a ${age} year old ${gender} patient who had decided they no longer required EMS services and was refusing further assistance. We were canceled on scene and promptly returned to service.`;
-            break;
-        case 'other':
-            const customReason = data['other-reason'];
-            if (customReason) {
-                narrative = `${context} ${customReason} ${unit} returned to service.`;
-            } else {
-                narrative = `${context} The call was canceled and ${unit} returned to service.`;
-            }
-            break;
-    }
-    
-    // Use embeddings to enhance narrative flow
-    try {
-        const embedding = await analyzeText(narrative);
-        return ensureProperPunctuation(narrative);
-    } catch (error) {
-        console.error('Error enhancing cancellation narrative:', error);
-        return ensureProperPunctuation(narrative);
-    }
-}
-
-// Expose generateCancellationNarrative to window
-window.generateCancellationNarrative = generateCancellationNarrative;
-
-// Form submission and narrative generation
-function initializeForm() {
-    const form = document.getElementById('narrative-form');
-    const outputSection = document.getElementById('output-section');
-    const narrativeText = document.getElementById('narrative-text');
-    const loadingIndicator = document.getElementById('loading-indicator');
-    const copyBtn = document.getElementById('copy-btn');
-    const editBtn = document.getElementById('edit-btn');
-
-    // Add real-time update listeners to all form fields
-    const formFields = form.querySelectorAll('input, select, textarea');
-    formFields.forEach(field => {
-        ['input', 'change'].forEach(eventType => {
-            field.addEventListener(eventType, () => {
-                if (window.performanceMonitor.isRealTimeEnabled) {
-                    window.performanceMonitor.debounce(async () => {
-                        narrativeText.classList.add('updating');
-                        
-                        try {
-                            const formData = new FormData(form);
-                            const data = Object.fromEntries(formData.entries());
-                            
-                            // Generate appropriate narrative based on call status
-                            let narrative;
-                            if (data['call-status'] === 'cancelled') {
-                                narrative = await generateCancellationNarrative(data);
-                            } else {
-                                narrative = await generateNarrative(data);
-                            }
-                            
-                            narrativeText.value = narrative;
-                            outputSection.classList.remove('hidden');
-                        } catch (error) {
-                            console.error('Error in real-time update:', error);
-                        } finally {
-                            setTimeout(() => {
-                                narrativeText.classList.remove('updating');
-                            }, 1000);
-                        }
-                    });
-                }
-            });
-        });
-    });
-
-    form.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        
-        if (!tfLoaded || !useLoaded) {
-            alert('AI system is not fully initialized yet. Please wait a moment and try again.');
-            return;
-        }
-
-        loadingIndicator.classList.remove('hidden');
-        outputSection.classList.add('hidden');
-
-        try {
-            const formData = new FormData(form);
-            const data = Object.fromEntries(formData.entries());
-            
-            // Generate appropriate narrative based on call status
-            let narrative;
-            if (data['call-status'] === 'cancelled') {
-                narrative = await generateCancellationNarrative(data);
-            } else {
-                narrative = await generateNarrative(data);
-            }
-            
-            narrativeText.value = narrative;
-            loadingIndicator.classList.add('hidden');
-            outputSection.classList.remove('hidden');
-        } catch (error) {
-            console.error('Error generating narrative:', error);
-            loadingIndicator.classList.add('hidden');
-            alert('An error occurred while generating the narrative. Please try again.');
-        }
-    });
-
-    copyBtn.addEventListener('click', function() {
-        narrativeText.select();
-        document.execCommand('copy');
-        showMessage('Copied to clipboard!');
-    });
-
-    editBtn.addEventListener('click', function() {
-        narrativeText.readOnly = !narrativeText.readOnly;
-        this.textContent = narrativeText.readOnly ? 'Enable Editing' : 'Disable Editing';
-    });
-}
-
-// Helper function to show temporary messages
-function showMessage(text) {
-    const message = document.createElement('div');
-    message.className = 'message';
-    message.textContent = text;
-    document.body.appendChild(message);
-    setTimeout(() => message.remove(), 3000);
-}
-
-// Update AI status indicator
-function updateAIStatus() {
-    const aiStatus = document.getElementById('ai-status');
-    if (aiStatus) {
-        if (tfLoaded && useLoaded) {
-            aiStatus.classList.remove('error');
-            aiStatus.setAttribute('title', 'AI active');
-        } else {
-            aiStatus.classList.add('error');
-            aiStatus.setAttribute('title', 'AI not fully initialized');
-        }
-    }
-}
