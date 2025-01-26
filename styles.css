@@ -61,6 +61,27 @@ header {
     margin-bottom: 1.5rem;
 }
 
+.sub-fields {
+    margin-top: 1rem;
+    padding-left: 1.5rem;
+    border-left: 3px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.sub-fields .form-group {
+    margin-bottom: 1rem;
+}
+
+.sub-fields.hidden {
+    display: none;
+}
+
+.sub-fields input[type="text"],
+.sub-fields select {
+    width: 100%;
+    max-width: 400px;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 0.5rem;

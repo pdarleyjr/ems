@@ -116,12 +116,39 @@ function processResponseDelays(delays) {
     }
 }
 
+// Helper function to ensure proper sentence punctuation
+function ensureProperPunctuation(text) {
+    text = text.trim();
+    if (!text.match(/[.!?]$/)) {
+        text += '.';
+    }
+    text = text.replace(/\.+/g, '.');
+    text = text.replace(/\.(?=[A-Za-z])/g, '. ');
+    return text;
+}
+
+// Helper function to combine checkbox and text input
+function combineCheckboxAndText(checkboxState, text, defaultText, connector = 'however') {
+    if (!checkboxState && !text) return '';
+    if (checkboxState && !text) return defaultText;
+    if (!checkboxState && text) return text;
+    
+    text = text.trim();
+    if (text.toLowerCase().startsWith('except') || 
+        text.toLowerCase().startsWith('but') || 
+        text.toLowerCase().startsWith('however')) {
+        return `${defaultText.slice(0, -1)} ${text}`;
+    }
+    
+    return `${defaultText.slice(0, -1)}, ${connector} ${text}`;
+}
+
 // Generate narrative based on embeddings and context
 async function generateSmartNarrative(data, context) {
     try {
         // Dispatch Information with response delays
         const responseDelayText = processResponseDelays(data['response-delays']);
-        const dispatchInfo = context + responseDelayText;
+        const dispatchInfo = ensureProperPunctuation(context + responseDelayText);
         
         // Assessment Information
         let assessmentInfo = '';
@@ -130,7 +157,7 @@ async function generateSmartNarrative(data, context) {
             const chiefComplaint = data['chief-complaint'] ? `complaining of ${data['chief-complaint']}` : '';
             const location = data['patient-location'] ? `${data['patient-location']}` : '';
             
-            assessmentInfo = `Upon arrival, we found the patient ${location ? `${location}, ` : ''}${chiefComplaint}`;
+            assessmentInfo = `Upon arrival, we found a ${patientDesc} patient ${location ? `${location}, ` : ''}${chiefComplaint}`;
             
             // Add OPQRST details if provided
             if (data['opqrst-toggle'] === 'on') {
@@ -165,29 +192,67 @@ async function generateSmartNarrative(data, context) {
                 }
             }
             
-            assessmentInfo += '. ';
+            assessmentInfo = ensureProperPunctuation(assessmentInfo);
             
-            if (data['medical-history']) {
-                assessmentInfo += `Patient's relevant medical history includes ${data['medical-history']}. `;
+            // Handle medical history with proper grammar
+            const medHistory = data['medical-history'] ? data['medical-history'].trim() : '';
+            if (medHistory) {
+                if (medHistory.toLowerCase().startsWith('no ') || 
+                    medHistory.toLowerCase().includes('none') || 
+                    medHistory.toLowerCase().includes('denies')) {
+                    assessmentInfo += ` The patient had no significant medical history. `;
+                } else {
+                    assessmentInfo += ` The patient's medical history was significant for ${medHistory}. `;
+                }
+            } else {
+                assessmentInfo += ` The patient had no significant medical history. `;
             }
-            
+
+            // Handle neurological assessment
             const gcsTotal = document.getElementById('gcs-total').value;
-            assessmentInfo += `The patient was alert and oriented times four, with a Glasgow Coma Scale of ${gcsTotal}. Their pupils were equal, round, and reactive to light, and there was no reported or observed loss of consciousness.`;
+            const pupils = data['pupils'] || 'PERRL';
+            assessmentInfo += ` The patient was ${data['mental-status'] || 'alert and oriented times four'}, with a Glasgow Coma Scale of ${gcsTotal}. `;
             
-            if (data['vitals-normal'] === 'on') {
-                assessmentInfo += ` Initial assessment revealed all vital signs were within normal limits.`;
-            } else if (data['vital-signs']) {
-                assessmentInfo += ` Initial assessment revealed ${data['vital-signs']}.`;
+            if (pupils === 'PERRL') {
+                assessmentInfo += ` Pupils were equal, round, and reactive to light. `;
+            } else {
+                assessmentInfo += ` Pupils were ${pupils.toLowerCase()}. `;
             }
-            
-            if (data['dcap-normal'] === 'on') {
-                assessmentInfo += ` Patient was negative for any DCAP-BTLS throughout the body.`;
-            } else if (data['physical-exam']) {
-                assessmentInfo += ` ${data['physical-exam']}.`;
+
+            // Handle vital signs with smart combination
+            if (data['vitals-normal'] === 'on' || data['vital-signs']) {
+                const vitalsText = data['vital-signs'] ? data['vital-signs'].trim() : '';
+                const vitalsInfo = combineCheckboxAndText(
+                    data['vitals-normal'] === 'on',
+                    vitalsText,
+                    'Initial vital signs were within normal limits.',
+                    'with the following readings'
+                );
+                if (vitalsInfo) {
+                    assessmentInfo += ` ${ensureProperPunctuation(vitalsInfo)} `;
+                }
             }
-            
-            // Add standard complaints denial if no specific physical exam notes
-            assessmentInfo += ` The patient denied any headache, nausea, vomiting, abdominal pain, diarrhea, chest pain, stroke-like symptoms, or other medical complaints.`;
+
+            // Handle physical examination with smart combination
+            if (data['dcap-normal'] === 'on' || data['physical-exam']) {
+                const examText = data['physical-exam'] ? data['physical-exam'].trim() : '';
+                const examInfo = combineCheckboxAndText(
+                    data['dcap-normal'] === 'on',
+                    examText,
+                    'Physical examination revealed the patient was negative for any DCAP-BTLS findings throughout the body.'
+                );
+                if (examInfo) {
+                    assessmentInfo += ` ${ensureProperPunctuation(examInfo)} `;
+                }
+            }
+
+            // Handle additional symptoms/complaints
+            if (data['additional-symptoms']) {
+                const additionalSymptoms = data['additional-symptoms'].trim();
+                if (additionalSymptoms) {
+                    assessmentInfo += ` Additional findings included ${ensureProperPunctuation(additionalSymptoms)} `;
+                }
+            }
         }
 
         // Treatment Information
@@ -201,18 +266,29 @@ async function generateSmartNarrative(data, context) {
         if (data['ice-pack'] === 'on') treatments.push('ice pack was applied');
         if (data['wound-care'] === 'on') treatments.push('the wound was cleaned and bandaged');
 
-        // Add additional treatment notes
-        if (data.treatment && data.treatment.trim()) {
-            treatments.push(data.treatment);
+        // Add additional treatment notes with smart combination
+        if (data['treatment-provided'] && data['treatment-provided'].trim()) {
+            const additionalTreatment = data['treatment-provided'].trim();
+            if (treatments.length > 0) {
+                if (additionalTreatment.toLowerCase().startsWith('additionally') ||
+                    additionalTreatment.toLowerCase().startsWith('also') ||
+                    additionalTreatment.toLowerCase().startsWith('furthermore')) {
+                    treatments.push(additionalTreatment);
+                } else {
+                    treatments.push(`additionally, ${additionalTreatment}`);
+                }
+            } else {
+                treatments.push(additionalTreatment);
+            }
         }
 
         if (treatments.length > 0) {
             // Add natural transition to treatment section
             const treatmentList = treatments.join(', ').replace(/,([^,]*)$/, ' and$1');
             if (data['transport-decision'] === 'transported') {
-                treatmentInfo = `Based on our assessment findings, the following interventions were performed: ${treatmentList}.`;
+                treatmentInfo = ensureProperPunctuation(`Based on our assessment findings, the following interventions were performed: ${treatmentList}`);
             } else {
-                treatmentInfo = `After completing our assessment, the following care was offered: ${treatmentList}.`;
+                treatmentInfo = ensureProperPunctuation(`After completing our assessment, the following care was offered: ${treatmentList}`);
             }
         }
 
@@ -222,7 +298,7 @@ async function generateSmartNarrative(data, context) {
             const hospital = data['hospital'] || '';
             const room = data['room-number'] ? `room ${data['room-number']}` : '';
             const staff = data['staff-name'] ? `RN ${data['staff-name']}` : '';
-            transportInfo = `The patient was transported to ${hospital} ${room} and left in the care of ${staff}.`;
+            transportInfo = ensureProperPunctuation(`The patient was transported to ${hospital} ${room} and left in the care of ${staff}`);
         } else if (data['transport-decision'] === 'refused') {
             let refusalInfo = `Despite our recommendations for transport to further evaluate their condition, the patient refused transport. `;
             refusalInfo += `The patient was advised of the risks associated with refusing medical care and transport. `;
@@ -239,7 +315,7 @@ async function generateSmartNarrative(data, context) {
             
             refusalInfo += `The patient signed a refusal form acknowledging these risks and was advised to call 911 if their condition worsens or they change their mind about transport.`;
             
-            transportInfo = refusalInfo;
+            transportInfo = ensureProperPunctuation(refusalInfo);
         }
 
         // Combine sections into a cohesive narrative
@@ -249,9 +325,28 @@ async function generateSmartNarrative(data, context) {
         // Use embeddings to enhance narrative flow
         const embedding = await analyzeText(sections.join(' '));
         
-        // Create flowing paragraphs
+        // Create flowing paragraphs and apply medical abbreviations
         const narrative = sections
-            .map(section => section.trim())
+            .map(section => {
+                let processedSection = section.trim();
+                processedSection = processedSection
+                    .replace(/alert and oriented times four/gi, 'AAOX4')
+                    .replace(/glasgow coma scale/gi, 'GCS')
+                    .replace(/pupils were equal, round, and reactive to light/gi, 'Pupils were PERRL')
+                    .replace(/blood pressure/gi, 'BP')
+                    .replace(/heart rate/gi, 'HR')
+                    .replace(/respiratory rate/gi, 'RR')
+                    .replace(/temperature/gi, 'Temp')
+                    .replace(/electrocardiogram/gi, 'EKG')
+                    .replace(/intravenous/gi, 'IV')
+                    .replace(/emergency department/gi, 'ED')
+                    .replace(/loss of consciousness/gi, 'LOC')
+                    .replace(/chest pain/gi, 'CP')
+                    .replace(/abdominal pain/gi, 'AP')
+                    .replace(/respiratory distress/gi, 'RD')
+                    .replace(/blood glucose level/gi, 'BGL');
+                return processedSection;
+            })
             .join('\n\n');
 
         return narrative;
@@ -261,7 +356,92 @@ async function generateSmartNarrative(data, context) {
     }
 }
 
-// Call Status functionality
+// Initialize transport decision handling
+function initializeTransportDecision() {
+    const transportDecision = document.getElementById('transport-decision');
+    const transportDetails = document.getElementById('transport-details');
+    const refusalDetails = document.getElementById('refusal-details');
+
+    // Initial state
+    transportDetails.classList.add('hidden');
+    refusalDetails.classList.add('hidden');
+
+    // Add change event listener
+    transportDecision.addEventListener('change', function() {
+        // First hide both sections
+        transportDetails.classList.add('hidden');
+        refusalDetails.classList.add('hidden');
+
+        // Show appropriate section based on selection
+        switch(this.value) {
+            case 'transported':
+                transportDetails.classList.remove('hidden');
+                // Reset refusal fields
+                document.getElementById('refusal-witness').value = '';
+                document.getElementById('refusal-capacity').value = '';
+                document.getElementById('refusal-instructions').value = '';
+                break;
+            case 'refused':
+                refusalDetails.classList.remove('hidden');
+                // Reset transport fields
+                document.getElementById('hospital').value = '';
+                document.getElementById('room-number').value = '';
+                document.getElementById('receiving-staff').value = '';
+                break;
+            default:
+                // Reset all fields when 'other' is selected
+                document.getElementById('hospital').value = '';
+                document.getElementById('room-number').value = '';
+                document.getElementById('receiving-staff').value = '';
+                document.getElementById('refusal-witness').value = '';
+                document.getElementById('refusal-capacity').value = '';
+                document.getElementById('refusal-instructions').value = '';
+                break;
+        }
+    });
+
+    // Trigger change event to set initial state
+    transportDecision.dispatchEvent(new Event('change'));
+}
+
+// Initialize GCS total calculation
+function initializeGCSCalculation() {
+    const gcsEyes = document.querySelector('select[name="gcs-eyes"]');
+    const gcsVerbal = document.querySelector('select[name="gcs-verbal"]');
+    const gcsMotor = document.querySelector('select[name="gcs-motor"]');
+    const gcsTotal = document.getElementById('gcs-total');
+
+    function updateGCSTotal() {
+        const total = parseInt(gcsEyes.value) + parseInt(gcsVerbal.value) + parseInt(gcsMotor.value);
+        gcsTotal.value = total;
+    }
+
+    gcsEyes.addEventListener('change', updateGCSTotal);
+    gcsVerbal.addEventListener('change', updateGCSTotal);
+    gcsMotor.addEventListener('change', updateGCSTotal);
+
+    // Initialize total
+    updateGCSTotal();
+}
+
+// Initialize custom unit handling
+function initializeCustomUnit() {
+    const unitNumber = document.getElementById('unit-number');
+    const customUnit = document.getElementById('custom-unit');
+
+    unitNumber.addEventListener('change', function() {
+        if (this.value === 'other') {
+            customUnit.classList.remove('hidden');
+            customUnit.required = true;
+        } else {
+            customUnit.classList.add('hidden');
+            customUnit.required = false;
+            customUnit.value = '';
+        }
+    });
+}
+
+// Initialize call status handling
 function initializeCallStatus() {
     const callStatusRadios = document.querySelectorAll('input[name="call-status"]');
     const cancellationDetails = document.getElementById('cancellation-details');
@@ -314,8 +494,6 @@ function initializeCallStatus() {
 
     // Cancellation type change handler
     cancellationType.addEventListener('change', function() {
-        console.log('Cancellation type changed:', this.value);
-        
         // Reset all special fields
         pdBadgeGroup.classList.add('hidden');
         otherCancellationGroup.classList.add('hidden');
@@ -344,62 +522,168 @@ function initializeCallStatus() {
     });
 }
 
-// Initialize GCS total calculation
-function initializeGCSCalculation() {
-    const gcsEyes = document.querySelector('select[name="gcs-eyes"]');
-    const gcsVerbal = document.querySelector('select[name="gcs-verbal"]');
-    const gcsMotor = document.querySelector('select[name="gcs-motor"]');
-    const gcsTotal = document.getElementById('gcs-total');
+// Initialize everything when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    // Create AI status indicator
+    const aiStatus = document.createElement('div');
+    aiStatus.id = 'ai-status';
+    aiStatus.setAttribute('title', 'AI initializing...');
+    document.body.appendChild(aiStatus);
 
-    function updateGCSTotal() {
-        const total = parseInt(gcsEyes.value) + parseInt(gcsVerbal.value) + parseInt(gcsMotor.value);
-        gcsTotal.value = total;
+    // Initialize performance monitoring
+    window.performanceMonitor.init();
+
+    // Initialize OPQRST toggle
+    const opqrstToggle = document.getElementById('opqrst-toggle');
+    const opqrstFields = document.getElementById('opqrst-fields');
+    
+    opqrstToggle.addEventListener('change', function() {
+        opqrstFields.classList.toggle('hidden', !this.checked);
+    });
+
+    // Initialize Select All Negatives functionality
+    const negAllCheckbox = document.getElementById('neg-all');
+    const negativeOptions = document.querySelectorAll('.negative-option');
+    
+    negAllCheckbox.addEventListener('change', function() {
+        negativeOptions.forEach(option => {
+            option.checked = this.checked;
+        });
+    });
+
+    // Update "Select All" state when individual options change
+    negativeOptions.forEach(option => {
+        option.addEventListener('change', function() {
+            const allChecked = Array.from(negativeOptions).every(opt => opt.checked);
+            negAllCheckbox.checked = allChecked;
+        });
+    });
+
+    // Initialize all functionality
+    initializeCallStatus();
+    initializeGCSCalculation();
+    initializeCustomUnit();
+    initializeTransportDecision();
+    initializeForm();
+    updateAIStatus();
+});
+
+// Enhanced dispatch text processing
+function enhanceDispatchText(text) {
+    if (!text) return '';
+    
+    const text_lower = text.toLowerCase().trim();
+    
+    // Common medical patterns
+    const patterns = {
+        // Conditions needing "a/an"
+        infection: (t) => `a possible ${t}`,
+        injury: (t) => `an ${t}`,
+        incident: (t) => `an ${t}`,
+        emergency: (t) => `a medical ${t}`,
+        illness: (t) => `an ${t}`,
+        allergy: (t) => `an allergic reaction`,
+        
+        // Pain-related terms
+        pain: (t) => `complaints of ${t}`,
+        ache: (t) => `complaints of ${t}`,
+        discomfort: (t) => `complaints of ${t}`,
+        
+        // Specific conditions
+        breathing: (t) => `difficulty breathing`,
+        respiratory: (t) => `respiratory distress`,
+        chest: (t) => `chest discomfort`,
+        fall: (t) => `a fall incident`,
+        trauma: (t) => `a trauma incident`,
+        bleeding: (t) => `active bleeding`,
+        dizzy: (t) => `dizziness`,
+        sick: (t) => `illness`,
+        weak: (t) => `weakness`,
+        unconscious: (t) => `an unconscious person`,
+        unresponsive: (t) => `an unresponsive person`,
+        seizure: (t) => `a possible seizure`,
+        stroke: (t) => `a possible stroke`,
+        diabetic: (t) => `a diabetic emergency`,
+        cardiac: (t) => `a cardiac event`,
+        overdose: (t) => `a possible overdose`,
+        psychiatric: (t) => `a psychiatric emergency`
+    };
+    
+    // Check for matching patterns
+    for (const [key, formatter] of Object.entries(patterns)) {
+        if (text_lower.includes(key)) {
+            return formatter(text_lower);
+        }
     }
-
-    gcsEyes.addEventListener('change', updateGCSTotal);
-    gcsVerbal.addEventListener('change', updateGCSTotal);
-    gcsMotor.addEventListener('change', updateGCSTotal);
-
-    // Initialize total
-    updateGCSTotal();
+    
+    // Default formatting for unmatched terms
+    if (!text_lower.startsWith('a ') && !text_lower.startsWith('an ')) {
+        return `a patient with ${text_lower}`;
+    }
+    
+    return text_lower;
 }
 
-// Initialize custom unit handling
-function initializeCustomUnit() {
-    const unitNumber = document.getElementById('unit-number');
-    const customUnit = document.getElementById('custom-unit');
+// Regular narrative generation
+window.generateNarrative = async function(data) {
+    try {
+        const unit = data['unit-number'] === 'other' ? data['custom-unit'] : data['unit-number'];
+        const dispatchReason = enhanceDispatchText(data['dispatch-reason'] || '');
+        const context = `${unit} was dispatched to ${dispatchReason}.`;
+        
+        // Get current GCS total
+        const gcsTotal = document.getElementById('gcs-total').value;
+        
+        // Create structured data for smart narrative generation
+        const narrativeData = {
+            assessment: true,
+            'patient-age': data['patient-age'],
+            'patient-gender': data['patient-gender'],
+            'patient-location': data['patient-location'],
+            'chief-complaint': data['chief-complaint'],
+            'medical-history': data['medical-history'],
+            'mental-status': data['mental-status'],
+            'pupils': data['pupils'],
+            'gcs-total': gcsTotal,
+            'vital-signs': data['vital-signs'],
+            'vitals-normal': data['vitals-normal'],
+            'physical-exam': data['physical-exam'],
+            'dcap-normal': data['dcap-normal'],
+            'treatment': data['treatment-provided'],
+            'bls-assessment': data['bls-assessment'],
+            'iv-established': data['iv-established'],
+            'ecg-performed': data['ecg-performed'],
+            'ice-pack': data['ice-pack'],
+            'wound-care': data['wound-care'],
+            'transport-decision': data['transport-decision'],
+            'hospital': data['hospital'],
+            'room-number': data['room-number'],
+            'staff-name': data['staff-name'],
+            'refusal-witness': data['refusal-witness'],
+            'refusal-capacity': data['refusal-capacity'],
+            'opqrst-toggle': data['opqrst-toggle'],
+            'onset': data['onset'],
+            'provocation': data['provocation'],
+            'quality': data['quality'],
+            'radiation': data['radiation'],
+            'severity': data['severity'],
+            'time': data['time'],
+            'response-delays': Array.isArray(data['response-delays']) ? data['response-delays'] : 
+                             data['response-delays'] ? [data['response-delays']] : []
+        };
+        
+        // Generate enhanced narrative with proper structure
+        const narrative = await generateSmartNarrative(narrativeData, context);
+        
+        // Add return to service
+        return `${narrative}\n\n${unit} returned to service.`;
+    } catch (error) {
+        console.error('Error in narrative generation:', error);
+        return `${unit || 'Unit'} was dispatched to ${data['dispatch-reason'] || 'location'}. Due to technical difficulties, a detailed narrative could not be generated.`;
+    }
+};
 
-    unitNumber.addEventListener('change', function() {
-        if (this.value === 'other') {
-            customUnit.classList.remove('hidden');
-            customUnit.required = true;
-        } else {
-            customUnit.classList.add('hidden');
-            customUnit.required = false;
-            customUnit.value = '';
-        }
-    });
-}
-
-// Initialize transport decision handling
-function initializeTransportDecision() {
-    const transportDecision = document.getElementById('transport-decision');
-    const transportDetails = document.getElementById('transport-details');
-    const refusalDetails = document.getElementById('refusal-details');
-
-    transportDecision.addEventListener('change', function() {
-        transportDetails.classList.add('hidden');
-        refusalDetails.classList.add('hidden');
-
-        if (this.value === 'transported') {
-            transportDetails.classList.remove('hidden');
-        } else if (this.value === 'refused') {
-            refusalDetails.classList.remove('hidden');
-        }
-    });
-}
-
-// Generate narrative based on cancellation type
+// Generate narrative for cancelled calls
 async function generateCancellationNarrative(data) {
     const unit = data['unit-number'] === 'other' ? data['custom-unit'] : data['unit-number'];
     const dispatchReason = enhanceDispatchText(data['dispatch-reason'] || '');
@@ -412,22 +696,22 @@ async function generateCancellationNarrative(data) {
     
     switch(data['cancellation-type']) {
         case 'dispatch':
-            narrative = `${context}. Before departing the station, dispatch advised that our services were no longer required and that we could cancel the response. ${unit} returned to service.`;
+            narrative = `${context} Before departing the station, dispatch advised that our services were no longer required and that we could cancel the response. ${unit} returned to service.`;
             break;
         case 'pd':
-            narrative = `${context}. Upon arrival, we were immediately canceled by the police department (Badge #${data['pd-badge']}) who determined no EMS services were needed. We returned to service without further action.`;
+            narrative = `${context} Upon arrival, we were immediately canceled by the police department (Badge #${data['pd-badge']}) who determined no EMS services were needed. We returned to service without further action.`;
             break;
         case 'caller':
             const age = data['patient-age'];
             const gender = data['patient-gender'];
-            narrative = `${context}. Upon arrival, we found the ${age} year old ${gender} patient had decided they no longer required EMS services and was refusing further assistance. We were canceled on scene and promptly returned to service.`;
+            narrative = `${context} Upon arrival, we found a ${age} year old ${gender} patient who had decided they no longer required EMS services and was refusing further assistance. We were canceled on scene and promptly returned to service.`;
             break;
         case 'other':
             const customReason = data['other-reason'];
             if (customReason) {
-                narrative = `${context}. ${customReason} ${unit} returned to service.`;
+                narrative = `${context} ${customReason} ${unit} returned to service.`;
             } else {
-                narrative = `${context}. The call was canceled and ${unit} returned to service.`;
+                narrative = `${context} The call was canceled and ${unit} returned to service.`;
             }
             break;
     }
@@ -435,12 +719,15 @@ async function generateCancellationNarrative(data) {
     // Use embeddings to enhance narrative flow
     try {
         const embedding = await analyzeText(narrative);
-        return narrative;
+        return ensureProperPunctuation(narrative);
     } catch (error) {
         console.error('Error enhancing cancellation narrative:', error);
-        return narrative;
+        return ensureProperPunctuation(narrative);
     }
 }
+
+// Expose generateCancellationNarrative to window
+window.generateCancellationNarrative = generateCancellationNarrative;
 
 // Form submission and narrative generation
 function initializeForm() {
@@ -554,140 +841,3 @@ function updateAIStatus() {
         }
     }
 }
-
-// Initialize everything when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    // Create AI status indicator
-    const aiStatus = document.createElement('div');
-    aiStatus.id = 'ai-status';
-    aiStatus.setAttribute('title', 'AI initializing...');
-    document.body.appendChild(aiStatus);
-
-    // Initialize performance monitoring
-    window.performanceMonitor.init();
-
-    // Initialize OPQRST toggle
-    const opqrstToggle = document.getElementById('opqrst-toggle');
-    const opqrstFields = document.getElementById('opqrst-fields');
-    
-    opqrstToggle.addEventListener('change', function() {
-        opqrstFields.classList.toggle('hidden', !this.checked);
-    });
-
-    // Initialize all functionality
-    initializeCallStatus();
-    initializeGCSCalculation();
-    initializeCustomUnit();
-    initializeTransportDecision();
-    initializeForm();
-    updateAIStatus();
-});
-
-// Enhanced dispatch text processing
-function enhanceDispatchText(text) {
-    if (!text) return '';
-    
-    const text_lower = text.toLowerCase().trim();
-    
-    // Common medical patterns
-    const patterns = {
-        // Conditions needing "a/an"
-        infection: (t) => `a possible ${t}`,
-        injury: (t) => `an ${t}`,
-        incident: (t) => `an ${t}`,
-        emergency: (t) => `a medical ${t}`,
-        illness: (t) => `an ${t}`,
-        allergy: (t) => `an allergic reaction`,
-        
-        // Pain-related terms
-        pain: (t) => `complaints of ${t}`,
-        ache: (t) => `complaints of ${t}`,
-        discomfort: (t) => `complaints of ${t}`,
-        
-        // Specific conditions
-        breathing: (t) => `difficulty breathing`,
-        respiratory: (t) => `respiratory distress`,
-        chest: (t) => `chest discomfort`,
-        fall: (t) => `a fall incident`,
-        trauma: (t) => `a trauma incident`,
-        bleeding: (t) => `active bleeding`,
-        dizzy: (t) => `dizziness`,
-        sick: (t) => `illness`,
-        weak: (t) => `weakness`,
-        unconscious: (t) => `an unconscious person`,
-        unresponsive: (t) => `an unresponsive person`,
-        seizure: (t) => `a possible seizure`,
-        stroke: (t) => `a possible stroke`,
-        diabetic: (t) => `a diabetic emergency`,
-        cardiac: (t) => `a cardiac event`,
-        overdose: (t) => `a possible overdose`,
-        psychiatric: (t) => `a psychiatric emergency`
-    };
-    
-    // Check for matching patterns
-    for (const [key, formatter] of Object.entries(patterns)) {
-        if (text_lower.includes(key)) {
-            return formatter(text_lower);
-        }
-    }
-    
-    // Default formatting for unmatched terms
-    if (!text_lower.startsWith('a ') && !text_lower.startsWith('an ')) {
-        return `a patient with ${text_lower}`;
-    }
-    
-    return text_lower;
-}
-
-// Regular narrative generation
-window.generateNarrative = async function(data) {
-    try {
-        const unit = data['unit-number'] === 'other' ? data['custom-unit'] : data['unit-number'];
-        const dispatchReason = enhanceDispatchText(data['dispatch-reason'] || '');
-        const context = `${unit} was dispatched to ${dispatchReason}.`;
-        
-        // Get current GCS total
-        const gcsTotal = document.getElementById('gcs-total').value;
-        
-        // Create structured data for smart narrative generation
-        const narrativeData = {
-            assessment: true,
-            'patient-age': data['patient-age'],
-            'patient-gender': data['patient-gender'],
-            'patient-location': data['patient-location'],
-            'chief-complaint': data['chief-complaint'],
-            'medical-history': data['medical-history'],
-            'gcs-total': gcsTotal,
-            'vital-signs': data['vital-signs'],
-            'physical-exam': data['physical-exam'],
-            'treatment': data['treatment'],
-            'transport-decision': data['transport-decision'],
-            'hospital': data['hospital'],
-            'room-number': data['room-number'],
-            'staff-name': data['staff-name'],
-            'refusal-witness': data['refusal-witness'],
-            'refusal-capacity': data['refusal-capacity'],
-            'opqrst-toggle': data['opqrst-toggle'],
-            'onset': data['onset'],
-            'provocation': data['provocation'],
-            'quality': data['quality'],
-            'radiation': data['radiation'],
-            'severity': data['severity'],
-            'time': data['time'],
-            'response-delays': Array.isArray(data['response-delays']) ? data['response-delays'] : 
-                             data['response-delays'] ? [data['response-delays']] : []
-        };
-        
-        // Generate enhanced narrative with proper structure
-        const narrative = await generateSmartNarrative(narrativeData, context);
-        
-        // Add return to service
-        return `${narrative}\n\n${unit} returned to service.`;
-    } catch (error) {
-        console.error('Error in narrative generation:', error);
-        return `${unit || 'Unit'} was dispatched to ${data['dispatch-reason'] || 'location'}. Due to technical difficulties, a detailed narrative could not be generated.`;
-    }
-};
-
-// Expose generateCancellationNarrative to window
-window.generateCancellationNarrative = generateCancellationNarrative;

@@ -226,6 +226,90 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="loc-assessment">Loss of Consciousness Assessment:</label>
+                            <select id="loc-assessment" name="loc-assessment" class="patient-field" required>
+                                <option value="none">Negative for any loss of consciousness</option>
+                                <option value="witnessed">Witnessed loss of consciousness</option>
+                                <option value="reported">Patient reports loss of consciousness</option>
+                                <option value="unknown">Unknown if loss of consciousness occurred</option>
+                            </select>
+                            
+                            <div id="loc-details" class="sub-fields">
+                                <div class="form-group">
+                                    <label for="loc-duration">Duration:</label>
+                                    <input type="text" id="loc-duration" name="loc-duration" 
+                                        placeholder="e.g., 2 minutes, unknown duration">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="loc-preceding">Preceding Events:</label>
+                                    <input type="text" id="loc-preceding" name="loc-preceding" 
+                                        placeholder="e.g., dizziness, chest pain, fall">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="loc-recovery">Recovery Status:</label>
+                                    <select id="loc-recovery" name="loc-recovery">
+                                        <option value="">Select recovery status</option>
+                                        <option value="rapid">Rapid recovery</option>
+                                        <option value="gradual">Gradual recovery</option>
+                                        <option value="incomplete">Incomplete recovery</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="loc-witness-details">Witness Details:</label>
+                                    <input type="text" id="loc-witness-details" name="loc-witness-details" 
+                                        placeholder="e.g., family member, bystander">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Pertinent Negatives:</label>
+                            <div class="checkbox-wrapper">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="neg-all" name="neg-all">
+                                    Select All Negatives
+                                </label>
+                                <div class="negative-options">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-headache" name="neg-headache" class="negative-option">
+                                        Denies headache
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-nausea" name="neg-nausea" class="negative-option">
+                                        Denies nausea/vomiting
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-chest-pain" name="neg-chest-pain" class="negative-option">
+                                        Denies chest pain
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-sob" name="neg-sob" class="negative-option">
+                                        Denies shortness of breath
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-dizziness" name="neg-dizziness" class="negative-option">
+                                        Denies dizziness
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-weakness" name="neg-weakness" class="negative-option">
+                                        Denies weakness
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-numbness" name="neg-numbness" class="negative-option">
+                                        Denies numbness/tingling
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="neg-abdominal" name="neg-abdominal" class="negative-option">
+                                        Denies abdominal pain
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
                             <label for="gcs-score">GCS Score:</label>
                             <div class="gcs-inputs">
                                 <div>
