@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMS Narrative Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <!-- AI Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder@1.3.3/dist/universal-sentence-encoder.min.js"></script>
+    <script src="performance.js"></script>
+    <script src="app.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <img src="Purple and White Modern Robot Illustration Technology Logo.png" alt="EMS Narrative Generator Logo">
+            </div>
+        </header>
+
+        <main>
+            <section id="input-form">
+                <form id="narrative-form">
+                    <div class="form-section dispatch-info">
+                        <h3>Dispatch Information</h3>
+                        <div class="form-group">
+                            <label for="unit-number">Unit Number:</label>
+                            <div class="unit-selection">
+                                <select id="unit-number" name="unit-number" required>
+                                    <option value="">Select unit</option>
+                                    <option value="R1">R1</option>
+                                    <option value="R11">R11</option>
+                                    <option value="R2">R2</option>
+                                    <option value="R22">R22</option>
+                                    <option value="R3">R3</option>
+                                    <option value="R4">R4</option>
+                                    <option value="R44">R44</option>
+                                    <option value="E1">E1</option>
+                                    <option value="E2">E2</option>
+                                    <option value="E3">E3</option>
+                                    <option value="E4">E4</option>
+                                    <option value="L1">L1</option>
+                                    <option value="L3">L3</option>
+                                    <option value="other">Other</option>
+                                </select>
+                                <input type="text" id="custom-unit" name="custom-unit" 
+                                    placeholder="Enter unit designation" 
+                                    class="hidden custom-unit-input">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Call Status:</label>
+                            <div class="call-status-toggle">
+                                <label>
+                                    <input type="radio" name="call-status" value="active" checked>
+                                    Active Call
+                                </label>
+                                <label>
+                                    <input type="radio" name="call-status" value="cancelled">
+                                    Call Cancelled
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="dispatch-reason">Dispatch Reason:</label>
+                            <input type="text" id="dispatch-reason" name="dispatch-reason" required placeholder="e.g., chest pain, fall, difficulty breathing">
+                        </div>
+
+                        <div id="cancellation-details" class="hidden">
+                            <div class="form-group">
+                                <label for="cancellation-type">Cancellation Type:</label>
+                                <select id="cancellation-type" name="cancellation-type">
+                                    <option value="dispatch">Call cancelled by dispatch</option>
+                                    <option value="pd">Call cancelled on scene by PD</option>
+                                    <option value="caller">Call cancelled on scene by caller</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+
+                            <div id="pd-badge-group" class="form-group hidden">
+                                <label for="pd-badge">PD Badge Number:</label>
+                                <input type="text" id="pd-badge" name="pd-badge" placeholder="Enter PD badge number">
+                            </div>
+
+                            <div id="other-cancellation-group" class="form-group hidden">
+                                <label for="other-reason">Cancellation Reason:</label>
+                                <textarea id="other-reason" name="other-reason" rows="2" 
+                                    placeholder="Enter detailed reason for cancellation"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="response-delays">Response Delays:</label>
+                            <select id="response-delays" name="response-delays" multiple>
+                                <option value="traffic">Heavy Traffic</option>
+                                <option value="weather">Inclement Weather</option>
+                                <option value="staging">Staging for Scene Security</option>
+                                <option value="access">Access Issues</option>
+                                <option value="directions">Difficulty Locating Address</option>
+                                <option value="none">No Delays</option>
+                            </select>
+                            <small class="help-text">Hold Ctrl/Cmd to select multiple</small>
+                        </div>
+                    </div>
+
+                    <div class="form-section patient-info">
+                        <h3>Patient Information</h3>
+                        <div class="form-group">
+                            <label for="patient-age">Patient Age:</label>
+                            <input type="number" id="patient-age" name="patient-age" class="patient-field" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patient-gender">Patient Gender:</label>
+                            <select id="patient-gender" name="patient-gender" class="patient-field" required>
+                                <option value="">Select gender</option>
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patient-location">Patient Location/Position Found:</label>
+                            <input type="text" id="patient-location" name="patient-location" class="patient-field" required placeholder="e.g., sitting in chair, lying on bathroom floor">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="medical-history">Relevant Medical History:</label>
+                            <textarea id="medical-history" name="medical-history" class="patient-field" rows="2" placeholder="Include relevant past medical history, medications"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-section assessment-info">
+                        <h3>Assessment</h3>
+                        <div class="form-group">
+                            <label for="chief-complaint">Chief Complaint:</label>
+                            <textarea id="chief-complaint" name="chief-complaint" rows="2" class="patient-field" 
+                                placeholder="Patient's stated complaint/reason for calling, if different from dispatch reason"></textarea>
+                            
+                            <div class="checkbox-wrapper">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="opqrst-toggle" name="opqrst-toggle">
+                                    OPQRST
+                                </label>
+                            </div>
+                            
+                            <div id="opqrst-fields" class="hidden">
+                                <div class="form-group">
+                                    <label for="onset">Onset:</label>
+                                    <select id="onset" name="onset" class="patient-field">
+                                        <option value="">Select onset</option>
+                                        <option value="gradual">Gradual</option>
+                                        <option value="sudden">Sudden</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="provocation">Provocation/Palliation:</label>
+                                    <input type="text" id="provocation" name="provocation" class="patient-field" 
+                                        placeholder="What makes it better or worse">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="quality">Quality:</label>
+                                    <select id="quality" name="quality" class="patient-field">
+                                        <option value="">Select quality</option>
+                                        <option value="changing">Changing</option>
+                                        <option value="dull">Dull</option>
+                                        <option value="pressure">Pressure</option>
+                                        <option value="sharp">Sharp</option>
+                                        <option value="steady">Steady</option>
+                                        <option value="burning">Burning</option>
+                                        <option value="aching">Aching</option>
+                                        <option value="stabbing">Stabbing</option>
+                                        <option value="throbbing">Throbbing</option>
+                                        <option value="cramping">Cramping</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="radiation">Radiation/Location:</label>
+                                    <input type="text" id="radiation" name="radiation" class="patient-field" 
+                                        placeholder="Where does it spread to">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="severity">Severity (1-10):</label>
+                                    <select id="severity" name="severity" class="patient-field">
+                                        <option value="">Select severity</option>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                        <option value="7">7</option>
+                                        <option value="8">8</option>
+                                        <option value="9">9</option>
+                                        <option value="10">10</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="time">Time:</label>
+                                    <input type="text" id="time" name="time" class="patient-field" 
+                                        placeholder="How long has it been present">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mental-status">Mental Status:</label>
+                            <select id="mental-status" name="mental-status" class="patient-field" required>
+                                <option value="Alert and oriented times 4">Alert and oriented times 4</option>
+                                <option value="Alert and oriented times 3">Alert and oriented times 3</option>
+                                <option value="Alert and oriented times 2">Alert and oriented times 2</option>
+                                <option value="Alert and oriented times 1">Alert and oriented times 1</option>
+                                <option value="Altered mental status">Altered mental status</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="gcs-score">GCS Score:</label>
+                            <div class="gcs-inputs">
+                                <div>
+                                    <label>Eyes:</label>
+                                    <select name="gcs-eyes" required>
+                                        <option value="4">4 - Spontaneous</option>
+                                        <option value="3">3 - To Voice</option>
+                                        <option value="2">2 - To Pain</option>
+                                        <option value="1">1 - None</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>Verbal:</label>
+                                    <select name="gcs-verbal" required>
+                                        <option value="5">5 - Oriented</option>
+                                        <option value="4">4 - Confused</option>
+                                        <option value="3">3 - Inappropriate</option>
+                                        <option value="2">2 - Incomprehensible</option>
+                                        <option value="1">1 - None</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>Motor:</label>
+                                    <select name="gcs-motor" required>
+                                        <option value="6">6 - Obeys Commands</option>
+                                        <option value="5">5 - Localizes Pain</option>
+                                        <option value="4">4 - Withdraws from Pain</option>
+                                        <option value="3">3 - Flexion</option>
+                                        <option value="2">2 - Extension</option>
+                                        <option value="1">1 - None</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>Total:</label>
+                                    <input type="text" id="gcs-total" readonly>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="pupils">Pupils:</label>
+                            <select id="pupils" name="pupils" class="patient-field" required>
+                                <option value="PERRL">PERRL</option>
+                                <option value="Unequal">Unequal</option>
+                                <option value="Fixed">Fixed</option>
+                                <option value="Dilated">Dilated</option>
+                                <option value="Constricted">Constricted</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vital-signs">Vital Signs:</label>
+                            <div class="checkbox-wrapper">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="vitals-normal" name="vitals-normal">
+                                    All vitals within normal limits
+                                </label>
+                            </div>
+                            <textarea id="vital-signs" name="vital-signs" class="patient-field" rows="2" placeholder="BP, HR, RR, SpO2, etc."></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="physical-exam">Physical Examination:</label>
+                            <div class="checkbox-wrapper">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="dcap-normal" name="dcap-normal">
+                                    Patient was negative for any DCAP-BTLS throughout the body
+                                </label>
+                            </div>
+                            <textarea id="physical-exam" name="physical-exam" class="patient-field" rows="2" placeholder="DCAP-BTLS findings"></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="additional-symptoms">Additional Symptoms/Complaints:</label>
+                            <textarea id="additional-symptoms" name="additional-symptoms" class="patient-field" rows="2" placeholder="Other symptoms reported or observed"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-section treatment-info">
+                        <h3>Treatment & Transport</h3>
+                        <div class="form-group">
+                            <label for="treatment-provided">Treatment Provided:</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="bls-assessment" name="bls-assessment">
+                                    BLS assessment performed
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="iv-established" name="iv-established">
+                                    IV established
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="ecg-performed" name="ecg-performed">
+                                    12 lead ECG performed
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="ice-pack" name="ice-pack">
+                                    Ice pack provided
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="wound-care" name="wound-care">
+                                    Wound was cleaned and bandaged
+                                </label>
+                            </div>
+                            <textarea id="treatment-provided" name="treatment-provided" rows="2" placeholder="Additional treatments or interventions"></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="transport-decision">Call Outcome:</label>
+                            <select id="transport-decision" name="transport-decision" required>
+                                <option value="">Select outcome</option>
+                                <option value="transported">Patient Transported</option>
+                                <option value="refused">Patient Refused Transport</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+
+                        <div id="transport-details" class="form-group hidden">
+                            <label for="hospital">Receiving Hospital:</label>
+                            <select id="hospital" name="hospital">
+                                <option value="">Select hospital</option>
+                                <option value="Mount Sinai">Mount Sinai</option>
+                                <option value="Jackson Hospital ER">Jackson Hospital ER</option>
+                                <option value="Aventura">Aventura</option>
+                                <option value="Ryder Trauma Center">Ryder Trauma Center</option>
+                                <option value="other">Other</option>
+                            </select>
+
+                            <label for="room-number">Room Number:</label>
+                            <input type="text" id="room-number" name="room-number" placeholder="e.g., Room 14">
+
+                            <label for="receiving-staff">Receiving Staff:</label>
+                            <input type="text" id="receiving-staff" name="receiving-staff" placeholder="e.g., RN Rodriguez">
+                        </div>
+
+                        <div id="refusal-details" class="form-group hidden">
+                            <label for="refusal-witness">Refusal Witness:</label>
+                            <input type="text" id="refusal-witness" name="refusal-witness" placeholder="e.g., family member, bystander">
+
+                            <label for="refusal-capacity">Patient Capacity Assessment:</label>
+                            <select id="refusal-capacity" name="refusal-capacity">
+                                <option value="">Select assessment</option>
+                                <option value="cleared">Cleared all capacity assessments</option>
+                                <option value="alert">Alert and oriented x4</option>
+                            </select>
+
+                            <label for="refusal-instructions">Instructions Given:</label>
+                            <textarea id="refusal-instructions" name="refusal-instructions" rows="2" 
+                                placeholder="e.g., advised to call 911 if condition worsens, seek immediate medical attention if symptoms return"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" id="generate-btn">Generate Narrative</button>
+                        <button type="reset" id="reset-btn">Reset Form</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="output-section" class="hidden">
+                <div class="form-section">
+                    <h3>Generated Narrative</h3>
+                    <div class="form-group">
+                        <textarea id="narrative-text" readonly></textarea>
+                        <div class="button-group">
+                            <button type="button" id="copy-btn" class="action-btn">Copy to Clipboard</button>
+                            <button type="button" id="edit-btn" class="action-btn">Enable Editing</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div id="loading-indicator" class="loading-indicator hidden">
+                <div class="spinner"></div>
+                <p>Generating narrative...</p>
+            </div>
+        </main>
+    </div>
+</body>
+</html>
